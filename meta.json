@@ -1,0 +1,28 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:frame-buffer",
+  "visibility": "public",
+  "url": "https://github.com/viam-labs/frame-buffer",
+  "description": "A camera that holds a single image and serves it until it is replaced.",
+  "models": [
+    {
+      "api": "rdk:component:camera",
+      "model": "viam:frame-buffer:camera",
+      "short_description": "Latches one frame from an upstream camera, or accepts a pushed image, and serves it.",
+      "markdown_link": "README.md"
+    }
+  ],
+  "applications": null,
+  "markdown_link": "README.md",
+  "entrypoint": "bin/frame-buffer",
+  "build": {
+    "build": "make module.tar.gz",
+    "setup": "make setup",
+    "path": "module.tar.gz",
+    "arch": [
+      "linux/amd64",
+      "linux/arm64",
+      "darwin/arm64"
+    ]
+  }
+}
