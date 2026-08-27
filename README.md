@@ -41,8 +41,13 @@ Waits out `delay_sec`, grabs one frame from the upstream camera, and latches it.
 {"capture": {}}
 ```
 
-The response is metadata only — the image itself is served over the camera API,
-so calling this from the app doesn't fill the response pane with base64:
+It latches **every** image the upstream returned, not just the first. A depth
+camera returns colour and depth together, and a consumer that wants to segment
+on depth needs the pair from the same instant — keeping only the first would
+make that impossible to reconstruct afterwards.
+
+The response is metadata only — the images themselves are served over the camera
+API, so calling this from the app doesn't fill the response pane with base64:
 
 ```json
 {
@@ -51,14 +56,29 @@ so calling this from the app doesn't fill the response pane with base64:
   "mime_type": "image/jpeg",
   "source_name": "color",
   "captured_at": "2026-08-26T16:41:02.113Z",
-  "size_bytes": 184203
+  "size_bytes": 184203,
+  "sources": [
+    { "source_name": "color", "mime_type": "image/jpeg", "width": 1280, "height": 720, "size_bytes": 184203 },
+    { "source_name": "depth", "mime_type": "image/vnd.viam.dep", "width": 0, "height": 0, "size_bytes": 1843224 }
+  ]
 }
+```
+
+The top-level fields describe the first source, so a single-image camera reads
+exactly as before. `sources` lists them all.
+
+Renderable images are served first, so a viewer asking for "the image" is never
+handed a depth map. Read one source by name:
+
+```go
+images, _, err := cam.Images(ctx, []string{"depth"}, nil)
 ```
 
 Frames that arrive already compressed (JPEG or PNG) are stored byte-for-byte;
 anything else is re-encoded as JPEG so consumers always get bytes a standard
-decoder can read. If the upstream hands back a depth frame, `capture` fails with
-a message telling you to set `source_name` rather than latching unusable data.
+decoder can read. **Depth frames are kept verbatim** — a depth map is not a
+picture, and re-encoding it as JPEG would destroy the millimetre values that are
+the only reason to carry it.
 
 ### `set_image`
 
@@ -96,6 +116,6 @@ The buffer lives in memory only — a module restart empties it.
 
 ## Limitations
 
-- One image at a time. There is no history.
+- One frame set at a time. There is no history.
 - `NextPointCloud` is not supported.
 - `capture` grabs a single frame on demand; it is not a recorder.
