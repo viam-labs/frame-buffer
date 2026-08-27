@@ -16,6 +16,14 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      # A stale go.mod fails package loading under -mod=readonly, and
+      # golangci-lint reports that as "no go files to analyze" — which points
+      # at the source rather than at the requirements that are actually missing.
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
@@ -30,8 +38,17 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      # proxy.golang.org intermittently drops connections mid-download on a
+      # dependency tree this size, which reads as a build failure. Retry rather
+      # than re-running the whole workflow by hand.
       - name: Setup
-        run: make setup
+        run: |
+          for attempt in 1 2 3; do
+            make setup && exit 0
+            echo "setup failed (attempt $attempt), retrying"
+            sleep 15
+          done
+          exit 1
 
       - name: Build
         run: make build
