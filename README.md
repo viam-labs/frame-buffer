@@ -27,11 +27,14 @@ and keeps serving it, which makes two things possible:
 | Attribute | Type | Required | Description |
 |---|---|---|---|
 | `camera` | string | no | Upstream camera the `capture` verb pulls a frame from. Omit for a buffer only ever filled by `set_image`. |
-| `source_name` | string | no | Which imager to take from a multi-imager camera. A depth camera returns both colour and depth — set this to the colour source (`"color"` on a RealSense). Empty uses the first image returned. |
+| `source_name` | string | no | Restrict capture to one imager. **Leave it unset to latch every source**, which is what a consumer pairing colour with depth needs. Setting it to `"color"` on a RealSense discards the depth frame. |
 | `delay_sec` | number | no | Countdown between `capture` being called and the frame being grabbed, so a subject has time to pose. Defaults to 0. |
 
 Configuring `camera` is what makes `capture` available; everything else works
 without an upstream.
+
+`source_name` is a filter, not a preference: setting it throws the other sources
+away. Leave it unset on a depth camera, since colour is served first regardless.
 
 ### `capture`
 
