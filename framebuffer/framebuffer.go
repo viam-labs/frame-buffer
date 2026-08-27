@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png" // register the PNG decoder for set_image and DecodeConfig
+	"sort"
 	"sync"
 	"time"
 
@@ -73,6 +74,44 @@ type frame struct {
 	capturedAt time.Time
 }
 
+func (f *frame) isDepth() bool {
+	return f.mimeType == rutils.MimeTypeRawDepth
+}
+
+func (f *frame) describe() map[string]interface{} {
+	return map[string]interface{}{
+		"source_name": f.sourceName,
+		"mime_type":   f.mimeType,
+		"width":       f.width,
+		"height":      f.height,
+		"size_bytes":  len(f.data),
+	}
+}
+
+// newFrame stores one image as it arrived. Depth is kept verbatim: it is not a
+// picture, and re-encoding it as JPEG would destroy the millimetre values that
+// are the only reason to carry it.
+func newFrame(ctx context.Context, named camera.NamedImage, capturedAt time.Time) (*frame, error) {
+	sourceName := named.SourceName
+	if sourceName == "" {
+		sourceName = defaultSourceName
+	}
+	encoded, mimeType, err := encodeForStorage(ctx, named)
+	if err != nil {
+		return nil, err
+	}
+	f := &frame{
+		data:       encoded,
+		mimeType:   mimeType,
+		sourceName: sourceName,
+		capturedAt: capturedAt,
+	}
+	if cfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(encoded)); cfgErr == nil {
+		f.width, f.height = cfg.Width, cfg.Height
+	}
+	return f, nil
+}
+
 type frameBuffer struct {
 	resource.AlwaysRebuild
 	resource.TriviallyCloseable
@@ -82,8 +121,12 @@ type frameBuffer struct {
 	cfg      *Config
 	upstream camera.Camera
 
-	mu      sync.RWMutex
-	latched *frame
+	mu sync.RWMutex
+	// latched holds every image the upstream returned, in its order. A depth
+	// camera returns colour and depth together, and a consumer that wants to
+	// segment on depth needs the pair from the same instant — latching only the
+	// first would make that impossible to reconstruct later.
+	latched []*frame
 }
 
 func newFrameBuffer(
@@ -123,21 +166,26 @@ func (fb *frameBuffer) Images(
 	_ map[string]interface{},
 ) ([]camera.NamedImage, resource.ResponseMetadata, error) {
 	fb.mu.RLock()
-	f := fb.latched
+	frames := fb.latched
 	fb.mu.RUnlock()
 
-	if f == nil {
+	if len(frames) == 0 {
 		return nil, resource.ResponseMetadata{}, errors.New(
 			"frame-buffer: no image latched yet; call the \"capture\" or \"set_image\" verb first")
 	}
-	if len(filterSourceNames) > 0 && !contains(filterSourceNames, f.sourceName) {
-		return nil, resource.ResponseMetadata{CapturedAt: f.capturedAt}, nil
+	meta := resource.ResponseMetadata{CapturedAt: frames[0].capturedAt}
+	out := make([]camera.NamedImage, 0, len(frames))
+	for _, f := range frames {
+		if len(filterSourceNames) > 0 && !contains(filterSourceNames, f.sourceName) {
+			continue
+		}
+		named, err := camera.NamedImageFromBytes(f.data, f.sourceName, f.mimeType, data.Annotations{})
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, fmt.Errorf("frame-buffer: %w", err)
+		}
+		out = append(out, named)
 	}
-	named, err := camera.NamedImageFromBytes(f.data, f.sourceName, f.mimeType, data.Annotations{})
-	if err != nil {
-		return nil, resource.ResponseMetadata{}, fmt.Errorf("frame-buffer: %w", err)
-	}
-	return []camera.NamedImage{named}, resource.ResponseMetadata{CapturedAt: f.capturedAt}, nil
+	return out, meta, nil
 }
 
 func contains(haystack []string, needle string) bool {
@@ -183,8 +231,8 @@ func (fb *frameBuffer) DoCommand(ctx context.Context, cmd map[string]interface{}
 	}
 }
 
-// capture counts down, grabs one frame from the upstream camera, and latches
-// it. The response is metadata only — read the image itself off the camera API.
+// capture counts down, grabs the upstream camera's frames, and latches them.
+// The response is metadata only — read the images off the camera API.
 func (fb *frameBuffer) capture(ctx context.Context) (map[string]interface{}, error) {
 	if fb.upstream == nil {
 		return nil, errors.New("frame-buffer: capture requires camera to be configured")
@@ -211,32 +259,32 @@ func (fb *frameBuffer) capture(ctx context.Context) (map[string]interface{}, err
 	if len(images) == 0 {
 		return nil, fmt.Errorf("frame-buffer: camera %q returned no images", fb.cfg.Camera)
 	}
-	named := images[0]
-	if named.MimeType() == rutils.MimeTypeRawDepth {
-		return nil, fmt.Errorf(
-			"frame-buffer: camera %q returned a depth image (source %q); set source_name to the colour source",
-			fb.cfg.Camera, named.SourceName)
-	}
-	encoded, mimeType, err := encodeForStorage(ctx, named)
-	if err != nil {
-		return nil, err
-	}
-	sourceName := named.SourceName
-	if sourceName == "" {
-		sourceName = defaultSourceName
-	}
 	capturedAt := meta.CapturedAt
 	if capturedAt.IsZero() {
 		capturedAt = time.Now()
 	}
-	return fb.latch(encoded, mimeType, sourceName, capturedAt)
+
+	frames := make([]*frame, 0, len(images))
+	for i := range images {
+		f, err := newFrame(ctx, images[i], capturedAt)
+		if err != nil {
+			return nil, err
+		}
+		frames = append(frames, f)
+	}
+	// Renderable images first, so a viewer asking for "the image" gets one it
+	// can display rather than a depth map.
+	sort.SliceStable(frames, func(i, j int) bool {
+		return !frames[i].isDepth() && frames[j].isDepth()
+	})
+	return fb.latchAll(frames)
 }
 
 // encodeForStorage keeps already-compressed frames byte-for-byte and re-encodes
 // anything else as JPEG, so consumers always get bytes a standard decoder reads.
 func encodeForStorage(ctx context.Context, named camera.NamedImage) ([]byte, string, error) {
 	switch named.MimeType() {
-	case rutils.MimeTypeJPEG, rutils.MimeTypePNG:
+	case rutils.MimeTypeRawDepth, rutils.MimeTypeJPEG, rutils.MimeTypePNG:
 		raw, err := named.Bytes(ctx)
 		if err != nil {
 			return nil, "", fmt.Errorf("frame-buffer: read image bytes: %w", err)
@@ -288,34 +336,53 @@ func (fb *frameBuffer) setImage(payload interface{}) (map[string]interface{}, er
 	return fb.latch(decoded, rutils.FormatStringToMimeType(format), sourceName, time.Now())
 }
 
-func (fb *frameBuffer) latch(encoded []byte, mimeType, sourceName string, capturedAt time.Time) (map[string]interface{}, error) {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(encoded))
-	if err != nil {
-		return nil, fmt.Errorf("frame-buffer: read image dimensions: %w", err)
+func (fb *frameBuffer) latchAll(frames []*frame) (map[string]interface{}, error) {
+	if len(frames) == 0 {
+		return nil, errors.New("frame-buffer: nothing to latch")
 	}
 	fb.mu.Lock()
-	fb.latched = &frame{
+	fb.latched = frames
+	fb.mu.Unlock()
+	return describeSet(frames), nil
+}
+
+func (fb *frameBuffer) latch(encoded []byte, mimeType, sourceName string, capturedAt time.Time) (map[string]interface{}, error) {
+	f := &frame{
 		data:       encoded,
 		mimeType:   mimeType,
 		sourceName: sourceName,
-		width:      cfg.Width,
-		height:     cfg.Height,
 		capturedAt: capturedAt,
 	}
-	fb.mu.Unlock()
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(encoded)); err == nil {
+		f.width, f.height = cfg.Width, cfg.Height
+	} else if !f.isDepth() {
+		return nil, fmt.Errorf("frame-buffer: read image dimensions: %w", err)
+	}
+	return fb.latchAll([]*frame{f})
+}
+
+// describeSet reports the first frame's details at the top level so a single
+// image reads the way it always has, with every source listed alongside.
+func describeSet(frames []*frame) map[string]interface{} {
+	sources := make([]interface{}, 0, len(frames))
+	for _, f := range frames {
+		sources = append(sources, f.describe())
+	}
+	first := frames[0]
 	return map[string]interface{}{
-		"width":       cfg.Width,
-		"height":      cfg.Height,
-		"mime_type":   mimeType,
-		"source_name": sourceName,
-		"captured_at": capturedAt.UTC().Format(time.RFC3339Nano),
-		"size_bytes":  len(encoded),
-	}, nil
+		"width":       first.width,
+		"height":      first.height,
+		"mime_type":   first.mimeType,
+		"source_name": first.sourceName,
+		"captured_at": first.capturedAt.UTC().Format(time.RFC3339Nano),
+		"size_bytes":  len(first.data),
+		"sources":     sources,
+	}
 }
 
 func (fb *frameBuffer) clear() (map[string]interface{}, error) {
 	fb.mu.Lock()
-	had := fb.latched != nil
+	had := len(fb.latched) > 0
 	fb.latched = nil
 	fb.mu.Unlock()
 	return map[string]interface{}{"cleared": had}, nil
@@ -323,17 +390,13 @@ func (fb *frameBuffer) clear() (map[string]interface{}, error) {
 
 func (fb *frameBuffer) Status(_ context.Context) (map[string]interface{}, error) {
 	fb.mu.RLock()
-	f := fb.latched
+	frames := fb.latched
 	fb.mu.RUnlock()
-	if f == nil {
+	if len(frames) == 0 {
 		return map[string]interface{}{"state": "empty"}, nil
 	}
-	return map[string]interface{}{
-		"state":       "latched",
-		"width":       f.width,
-		"height":      f.height,
-		"mime_type":   f.mimeType,
-		"source_name": f.sourceName,
-		"captured_at": f.capturedAt.UTC().Format(time.RFC3339Nano),
-	}, nil
+	out := describeSet(frames)
+	delete(out, "size_bytes")
+	out["state"] = "latched"
+	return out, nil
 }
