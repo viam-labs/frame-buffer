@@ -171,7 +171,8 @@ func (fb *frameBuffer) Images(
 
 	if len(frames) == 0 {
 		return nil, resource.ResponseMetadata{}, errors.New(
-			"frame-buffer: no image latched yet; call the \"capture\" or \"set_image\" verb first")
+			"frame-buffer: no image latched yet; call the \"capture\" or \"set_image\" verb first",
+		)
 	}
 	meta := resource.ResponseMetadata{CapturedAt: frames[0].capturedAt}
 	out := make([]camera.NamedImage, 0, len(frames))

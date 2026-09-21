@@ -3,7 +3,7 @@ module github.com/viam-labs/frame-buffer
 go 1.25.10
 
 require (
-	go.viam.com/rdk v1.1.0
+	go.viam.com/rdk v1.6.0
 	go.viam.com/test v1.2.4
 )
 
@@ -133,7 +133,7 @@ require (
 	github.com/petermattis/goid v0.0.0-20260330135022-df67b199bc81 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
 	github.com/pion/dtls/v2 v2.2.12 // indirect
-	github.com/pion/dtls/v3 v3.0.11 // indirect
+	github.com/pion/dtls/v3 v3.1.4 // indirect
 	github.com/pion/ice/v4 v4.0.13 // indirect
 	github.com/pion/interceptor v0.1.42 // indirect
 	github.com/pion/logging v0.2.4 // indirect
@@ -148,10 +148,10 @@ require (
 	github.com/pion/srtp/v2 v2.0.20 // indirect
 	github.com/pion/srtp/v3 v3.0.9 // indirect
 	github.com/pion/stun v0.6.1 // indirect
-	github.com/pion/stun/v3 v3.0.2 // indirect
+	github.com/pion/stun/v3 v3.1.5 // indirect
 	github.com/pion/transport/v2 v2.2.10 // indirect
 	github.com/pion/transport/v3 v3.1.1 // indirect
-	github.com/pion/transport/v4 v4.0.1 // indirect
+	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v2 v2.1.6 // indirect
 	github.com/pion/turn/v4 v4.1.3 // indirect
 	github.com/pion/webrtc/v4 v4.1.8 // indirect
@@ -198,8 +198,8 @@ require (
 	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	go.viam.com/api v0.1.574 // indirect
-	go.viam.com/utils v0.8.1 // indirect
+	go.viam.com/api v0.1.577 // indirect
+	go.viam.com/utils v0.10.1 // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
@@ -209,9 +209,9 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.46.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 	gonum.org/v1/plot v0.15.2 // indirect
